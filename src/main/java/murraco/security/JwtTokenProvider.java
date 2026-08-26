@@ -5,107 +5,89 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.List;
-import java.util.stream.Collectors;
-
-import jakarta.annotation.PostConstruct;
-import jakarta.servlet.http.HttpServletRequest;
 
 import javax.crypto.SecretKey;
 
-import lombok.RequiredArgsConstructor;
-import murraco.model.AppUserRole;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.stereotype.Component;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import murraco.exception.CustomException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-@Component
-@RequiredArgsConstructor
+import murraco.exception.CustomException;
+import murraco.model.AppUserRole;
+
+@ApplicationScoped
 public class JwtTokenProvider {
 
-  @Value("${security.jwt.token.secret-key:secret-key}")
-  private String secretKey;
+  @ConfigProperty(name = "security.jwt.token.secret-key", defaultValue = "secret-key")
+  String secretKey;
 
-  @Value("${security.jwt.token.expire-length:3600000}")
-  private long validityInMilliseconds = 3600000;
-
-  private final MyUserDetails myUserDetails;
-
-  private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
+  @ConfigProperty(name = "security.jwt.token.expire-length", defaultValue = "3600000")
+  long validityInMilliseconds;
 
   private SecretKey signingKey;
 
   @PostConstruct
   protected void init() {
     try {
-      byte[] keyBytes = MessageDigest.getInstance("SHA-256").digest(secretKey.getBytes(StandardCharsets.UTF_8));
-      signingKey = Keys.hmacShaKeyFor(keyBytes);
+      byte[] digest = MessageDigest.getInstance("SHA-256").digest(secretKey.getBytes(StandardCharsets.UTF_8));
+      this.signingKey = Keys.hmacShaKeyFor(digest);
     } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 not available", e);
+      throw new IllegalStateException("Unable to initialize JWT signing key", e);
     }
   }
 
   public String createToken(String username, List<AppUserRole> appUserRoles) {
-    List<String> roleNames = appUserRoles.stream().map(AppUserRole::name).collect(Collectors.toList());
+    List<String> roles = appUserRoles.stream().map(AppUserRole::name).toList();
+
     Date now = new Date();
     Date validity = new Date(now.getTime() + validityInMilliseconds);
+
     return Jwts.builder()
         .subject(username)
-        .claim("auth", roleNames)
+        .claim("auth", roles)
         .issuedAt(now)
         .expiration(validity)
         .signWith(signingKey)
         .compact();
   }
 
-  /** Access token lifetime in seconds, as reported to clients in the auth response. */
   public long getValidityInSeconds() {
     return validityInMilliseconds / 1000;
   }
 
-  public Authentication getAuthentication(String token) {
-    UserDetails userDetails = myUserDetails.loadUserByUsername(getUsername(token));
-    return new UsernamePasswordAuthenticationToken(userDetails, "", userDetails.getAuthorities());
-  }
-
   public String getUsername(String token) {
-    Claims claims = Jwts.parser()
-        .verifyWith(signingKey)
-        .build()
-        .parseSignedClaims(token)
-        .getPayload();
-    return claims.getSubject();
+    return parse(token).getSubject();
   }
 
-  public String resolveToken(HttpServletRequest req) {
-    String bearerToken = req.getHeader("Authorization");
-    if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-      return bearerToken.substring(7);
+  @SuppressWarnings("unchecked")
+  public List<String> getRoles(String token) {
+    Object auth = parse(token).get("auth");
+    if (auth instanceof List<?> list) {
+      return list.stream().map(String::valueOf).toList();
     }
-    return null;
+    return List.of();
   }
 
   public boolean validateToken(String token) {
     try {
-      Jwts.parser()
-          .verifyWith(signingKey)
-          .build()
-          .parseSignedClaims(token);
+      parse(token);
       return true;
     } catch (JwtException | IllegalArgumentException e) {
-      log.debug("Invalid JWT token", e);
-      throw new CustomException("Expired or invalid JWT token", HttpStatus.UNAUTHORIZED);
+      throw new CustomException("Expired or invalid JWT token", 401);
     }
   }
 
+  private Claims parse(String token) {
+    return Jwts.parser()
+        .verifyWith(signingKey)
+        .build()
+        .parseSignedClaims(token)
+        .getPayload();
+  }
 }

@@ -1,6 +1,6 @@
 package murraco.dto;
 
-import io.swagger.v3.oas.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -22,5 +22,4 @@ public class AuthResponseDTO {
 
   @Schema(description = "Access token lifetime in seconds")
   private long expiresIn;
-
 }

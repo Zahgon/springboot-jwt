@@ -1,25 +1,30 @@
 package murraco.repository;
 
-import java.util.Optional;
-
+import io.quarkus.hibernate.orm.panache.PanacheRepositoryBase;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
-
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-
+import java.util.Optional;
 import murraco.model.RefreshToken;
 
-public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Integer> {
+@ApplicationScoped
+public class RefreshTokenRepository implements PanacheRepositoryBase<RefreshToken, Integer> {
 
-  Optional<RefreshToken> findByTokenHash(String tokenHash);
+  public Optional<RefreshToken> findByTokenHash(String tokenHash) {
+    return find("tokenHash", tokenHash).firstResultOptional();
+  }
 
   @Transactional
-  void deleteByUsername(String username);
+  public void save(RefreshToken refreshToken) {
+    persist(refreshToken);
+  }
 
   @Transactional
-  @Modifying
-  @Query("update RefreshToken t set t.revoked = true where t.username = :username and t.revoked = false")
-  int revokeAllByUsername(String username);
+  public void deleteByUsername(String username) {
+    delete("username", username);
+  }
 
+  @Transactional
+  public int revokeAllByUsername(String username) {
+    return update("revoked = true where username = ?1 and revoked = false", username);
+  }
 }
